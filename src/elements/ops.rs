@@ -2183,18 +2183,16 @@ impl Serialize for Instruction {
 			I64x2TruncUF64x2Sat => simd!(writer, opcodes::I64X2_TRUNC_U_F64X2_SAT, ()),
 
 			MemoryInit(seg) => bulk!(writer, MEMORY_INIT, {
-				Uint8::from(0).serialize(writer)?;
 				VarUint32::from(seg).serialize(writer)?;
 			}),
 			MemoryDrop(seg) => bulk!(writer, MEMORY_DROP, VarUint32::from(seg).serialize(writer)?),
-			MemoryFill => bulk!(writer, MEMORY_FILL, Uint8::from(0).serialize(writer)?),
-			MemoryCopy => bulk!(writer, MEMORY_COPY, Uint8::from(0).serialize(writer)?),
+			MemoryFill => bulk!(writer, MEMORY_FILL, ()),
+			MemoryCopy => bulk!(writer, MEMORY_COPY, ()),
 			TableInit(seg) => bulk!(writer, TABLE_INIT, {
-				Uint8::from(0).serialize(writer)?;
 				VarUint32::from(seg).serialize(writer)?;
 			}),
 			TableDrop(seg) => bulk!(writer, TABLE_DROP, VarUint32::from(seg).serialize(writer)?),
-			TableCopy => bulk!(writer, TABLE_COPY, Uint8::from(0).serialize(writer)?),
+			TableCopy => bulk!(writer, TABLE_COPY, ()),
 		}
 
 		Ok(())

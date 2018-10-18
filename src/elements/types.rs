@@ -44,6 +44,10 @@ pub enum ValueType {
 	F64,
 	/// 128-bit SIMD register
 	V128,
+	/// The `anyfunc` type which loads functions from a table
+	AnyFunc,
+	/// The `anyref` type which is an opaque reference to a host object
+	AnyRef,
 }
 
 impl Deserialize for ValueType {
@@ -58,6 +62,8 @@ impl Deserialize for ValueType {
 			-0x03 => Ok(ValueType::F32),
 			-0x04 => Ok(ValueType::F64),
 			-0x05 => Ok(ValueType::V128),
+			-0x10 => Ok(ValueType::AnyFunc),
+			-0x11 => Ok(ValueType::AnyRef),
 			_ => Err(Error::UnknownValueType(val.into())),
 		}
 	}
@@ -73,6 +79,8 @@ impl Serialize for ValueType {
 			ValueType::F32 => -0x03,
 			ValueType::F64 => -0x04,
 			ValueType::V128 => -0x05,
+			ValueType::AnyFunc => -0x10,
+			ValueType::AnyRef => -0x11,
 		}.into();
 		val.serialize(writer)?;
 		Ok(())
@@ -87,6 +95,8 @@ impl fmt::Display for ValueType {
 			ValueType::F32 => write!(f, "f32"),
 			ValueType::F64 => write!(f, "f64"),
 			ValueType::V128 => write!(f, "v128"),
+			ValueType::AnyFunc => write!(f, "anyfunc"),
+			ValueType::AnyRef => write!(f, "anyref"),
 		}
 	}
 }
@@ -111,7 +121,9 @@ impl Deserialize for BlockType {
 			-0x02 => Ok(BlockType::Value(ValueType::I64)),
 			-0x03 => Ok(BlockType::Value(ValueType::F32)),
 			-0x04 => Ok(BlockType::Value(ValueType::F64)),
-			0x7b => Ok(BlockType::Value(ValueType::V128)),
+			-0x05 => Ok(BlockType::Value(ValueType::V128)),
+			-0x10 => Ok(BlockType::Value(ValueType::AnyFunc)),
+			-0x11 => Ok(BlockType::Value(ValueType::AnyRef)),
 			-0x40 => Ok(BlockType::NoResult),
 			_ => Err(Error::UnknownValueType(val.into())),
 		}
@@ -128,7 +140,9 @@ impl Serialize for BlockType {
 			BlockType::Value(ValueType::I64) => -0x02,
 			BlockType::Value(ValueType::F32) => -0x03,
 			BlockType::Value(ValueType::F64) => -0x04,
-			BlockType::Value(ValueType::V128) => 0x7b,
+			BlockType::Value(ValueType::V128) => -0x05,
+			BlockType::Value(ValueType::AnyFunc) => -0x10,
+			BlockType::Value(ValueType::AnyRef) => -0x11,
 		}.into();
 		val.serialize(writer)?;
 		Ok(())
@@ -233,17 +247,18 @@ impl Serialize for FunctionType {
 pub enum TableElementType {
 	/// A reference to a function with any signature.
 	AnyFunc,
+	/// A reference to an opaque host object
+	AnyRef,
 }
 
 impl Deserialize for TableElementType {
 	type Error = Error;
 
 	fn deserialize<R: io::Read>(reader: &mut R) -> Result<Self, Self::Error> {
-		let val = VarInt7::deserialize(reader)?;
-
-		match val.into() {
-			-0x10 => Ok(TableElementType::AnyFunc),
-			_ => Err(Error::UnknownTableElementType(val.into())),
+		match ValueType::deserialize(reader)? {
+			ValueType::AnyFunc => Ok(TableElementType::AnyFunc),
+			ValueType::AnyRef => Ok(TableElementType::AnyRef),
+			other => Err(Error::UnknownTableElementType(other)),
 		}
 	}
 }
@@ -252,10 +267,9 @@ impl Serialize for TableElementType {
 	type Error = Error;
 
 	fn serialize<W: io::Write>(self, writer: &mut W) -> Result<(), Self::Error> {
-		let val: VarInt7 = match self {
-			TableElementType::AnyFunc => -0x10,
-		}.into();
-		val.serialize(writer)?;
-		Ok(())
+		match self {
+			TableElementType::AnyFunc => ValueType::AnyFunc.serialize(writer),
+			TableElementType::AnyRef => ValueType::AnyRef.serialize(writer),
+		}
 	}
 }

@@ -63,9 +63,9 @@ pub struct TableType {
 
 impl TableType {
 	/// New table definition
-	pub fn new(min: u32, max: Option<u32>) -> Self {
+	pub fn new(elem_type: TableElementType, min: u32, max: Option<u32>) -> Self {
 		TableType {
-			elem_type: TableElementType::AnyFunc,
+			elem_type,
 			limits: ResizableLimits::new(min, max),
 		}
 	}

@@ -102,8 +102,8 @@ pub enum Error {
 	/// Invalid/unknown value type declaration.
 	UnknownValueType(i8),
 	/// Invalid/unknown table element type declaration.
-	UnknownTableElementType(i8),
-	/// Non-utf8 string.
+	UnknownTableElementType(ValueType),
+	/// Non-utf8 string
 	NonUtf8String,
 	/// Unknown external kind code.
 	UnknownExternalKind(u8),

@@ -101,7 +101,13 @@ impl<F> ImportExternalBuilder<F> where F: Invoke<elements::External> {
 
 	/// Table mapping with specified limits
 	pub fn table(mut self, min: u32, max: Option<u32>) -> F::Result {
-		self.binding = elements::External::Table(elements::TableType::new(min, max));
+		self.binding = elements::External::Table(
+			elements::TableType::new(
+				elements::TableElementType::AnyFunc,
+				min,
+				max,
+			)
+		);
 		self.callback.invoke(self.binding)
 	}
 

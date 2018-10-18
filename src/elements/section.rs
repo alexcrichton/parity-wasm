@@ -127,6 +127,22 @@ impl Deserialize for Section {
 				11 => {
 					Section::Data(DataSection::deserialize(reader)?)
 				},
+				42 => {
+					let mut amt: u32 = VarUint32::deserialize(reader)?.into();
+					let mut b = [0; 16];
+                    let mut res = Vec::new();
+                    VarUint32::from(amt).serialize(&mut res)?;
+					while amt > 0 {
+						let len = ::std::cmp::min(amt as usize, b.len());
+						reader.read(&mut b[..len])?;
+						amt -= len as u32;
+                        res.extend_from_slice(&b[..len]);
+					}
+					Section::Unparsed {
+						id: 42,
+						payload: res,
+					}
+				},
 				invalid_id => {
 					return Err(Error::InvalidSectionId(invalid_id))
 				},

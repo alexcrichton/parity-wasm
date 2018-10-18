@@ -120,7 +120,7 @@ pub enum Instruction {
 	Return,
 
 	Call(u32),
-	CallIndirect(u32, u8),
+	CallIndirect(u32, u32),
 
 	Drop,
 	Select,
@@ -130,6 +130,10 @@ pub enum Instruction {
 	TeeLocal(u32),
 	GetGlobal(u32),
 	SetGlobal(u32),
+
+	TableGet(u32),
+	TableSet(u32),
+	TableGrow(u32),
 
 	// All store/load instructions operate with 'memory immediates'
 	// which represented here as (flag, offset) tuple
@@ -301,6 +305,9 @@ pub enum Instruction {
 	I64Extend8S,
 	I64Extend16S,
 	I64Extend32S,
+
+	RefNull,
+	RefIsNull,
 
 	AtomicWake(MemArg),
 	I32AtomicWait(MemArg),
@@ -760,6 +767,9 @@ pub mod opcodes {
 	pub const I64_EXTEND16_S: u8 = 0xc3;
 	pub const I64_EXTEND32_S: u8 = 0xc4;
 
+	pub const REFNULL: u8 = 0xd0;
+	pub const REFISNULL: u8 = 0xd1;
+
 	pub const ATOMIC_PREFIX: u8 = 0xfe;
 	pub const ATOMIC_WAKE: u8 = 0x00;
 	pub const I32_ATOMIC_WAIT: u8 = 0x01;
@@ -1007,6 +1017,9 @@ pub mod opcodes {
 	pub const TABLE_INIT: u8 = 0x0c;
 	pub const TABLE_DROP: u8 = 0x0d;
 	pub const TABLE_COPY: u8 = 0x0e;
+	pub const TABLE_GROW: u8 = 0x0f;
+	pub const TABLE_GET: u8 = 0x10;
+	pub const TABLE_SET: u8 = 0x11;
 }
 
 impl Deserialize for Instruction {
@@ -1046,8 +1059,7 @@ impl Deserialize for Instruction {
 				CALL => Call(VarUint32::deserialize(reader)?.into()),
 				CALLINDIRECT => {
 					let signature: u32 = VarUint32::deserialize(reader)?.into();
-					let table_ref: u8 = Uint8::deserialize(reader)?.into();
-					if table_ref != 0 { return Err(Error::InvalidTableReference(table_ref)); }
+					let table_ref: u32 = VarUint32::deserialize(reader)?.into();
 
 					CallIndirect(
 						signature,
@@ -1307,10 +1319,13 @@ impl Deserialize for Instruction {
 				I64_EXTEND16_S => I64Extend16S,
 				I64_EXTEND32_S => I64Extend32S,
 
+				REFNULL => RefNull,
+				REFISNULL => RefIsNull,
+
 				ATOMIC_PREFIX => return deserialize_atomic(reader),
 				SIMD_PREFIX => return deserialize_simd(reader),
 
-				BULK_PREFIX => return deserialize_bulk(reader),
+				BULK_PREFIX => return deserialize_misc(reader),
 
 				_ => { return Err(Error::UnknownOpcode(val)); }
 			}
@@ -1567,7 +1582,7 @@ fn deserialize_simd<R: io::Read>(reader: &mut R) -> Result<Instruction, Error> {
 	})
 }
 
-fn deserialize_bulk<R: io::Read>(reader: &mut R) -> Result<Instruction, Error> {
+fn deserialize_misc<R: io::Read>(reader: &mut R) -> Result<Instruction, Error> {
 	use self::Instruction::*;
 	use self::opcodes::*;
 
@@ -1605,6 +1620,30 @@ fn deserialize_bulk<R: io::Read>(reader: &mut R) -> Result<Instruction, Error> {
 				return Err(Error::UnknownOpcode(val))
 			}
 			TableCopy
+		}
+		TABLE_GET => {
+			let flags: u8 = Uint8::deserialize(reader)?.into();
+			TableGet(if flags != 0 {
+				VarUint32::deserialize(reader)?.into()
+			} else {
+				0
+			})
+		}
+		TABLE_SET => {
+			let flags: u8 = Uint8::deserialize(reader)?.into();
+			TableSet(if flags != 0 {
+				VarUint32::deserialize(reader)?.into()
+			} else {
+				0
+			})
+		}
+		TABLE_GROW => {
+			let flags: u8 = Uint8::deserialize(reader)?.into();
+			TableGrow(if flags != 0 {
+				VarUint32::deserialize(reader)?.into()
+			} else {
+				0
+			})
 		}
 
 		_ => return Err(Error::UnknownOpcode(val)),
@@ -1698,7 +1737,7 @@ impl Serialize for Instruction {
 			}),
 			CallIndirect(index, reserved) => op!(writer, CALLINDIRECT, {
 				VarUint32::from(index).serialize(writer)?;
-				Uint8::from(reserved).serialize(writer)?;
+				VarUint32::from(reserved).serialize(writer)?;
 			}),
 			Drop => op!(writer, DROP),
 			Select => op!(writer, SELECT),
@@ -1964,6 +2003,9 @@ impl Serialize for Instruction {
 			I64Extend16S => op!(writer, I64_EXTEND16_S),
 			I64Extend32S => op!(writer, I64_EXTEND32_S),
 
+			RefNull => op!(writer, REFNULL),
+			RefIsNull => op!(writer, REFISNULL),
+
 			AtomicWake(m) => atomic!(writer, ATOMIC_WAKE, m),
 			I32AtomicWait(m) => atomic!(writer, I32_ATOMIC_WAIT, m),
 			I64AtomicWait(m) => atomic!(writer, I64_ATOMIC_WAIT, m),
@@ -2204,6 +2246,21 @@ impl Serialize for Instruction {
 			}),
 			TableDrop(seg) => bulk!(writer, TABLE_DROP, VarUint32::from(seg).serialize(writer)?),
 			TableCopy => bulk!(writer, TABLE_COPY, Uint8::from(0).serialize(writer)?),
+			TableGet(0) => bulk!(writer, TABLE_GET, Uint8::from(0).serialize(writer)?),
+			TableSet(0) => bulk!(writer, TABLE_SET, Uint8::from(0).serialize(writer)?),
+			TableGrow(0) => bulk!(writer, TABLE_GROW, Uint8::from(0).serialize(writer)?),
+			TableGet(idx) => bulk!(writer, TABLE_GET, {
+				Uint8::from(0x4).serialize(writer)?;
+				VarUint32::from(idx).serialize(writer)?;
+			}),
+			TableSet(idx) => bulk!(writer, TABLE_SET, {
+				Uint8::from(0x4).serialize(writer)?;
+				VarUint32::from(idx).serialize(writer)?;
+			}),
+			TableGrow(idx) => bulk!(writer, TABLE_GROW, {
+				Uint8::from(0x4).serialize(writer)?;
+				VarUint32::from(idx).serialize(writer)?;
+			}),
 		}
 
 		Ok(())
@@ -2261,6 +2318,9 @@ impl fmt::Display for Instruction {
 			TeeLocal(index) => fmt_op!(f, "tee_local", index),
 			GetGlobal(index) => fmt_op!(f, "get_global", index),
 			SetGlobal(index) => fmt_op!(f, "set_global", index),
+			TableGet(index) => fmt_op!(f, "table.get", index),
+			TableSet(index) => fmt_op!(f, "table.set", index),
+			TableGrow(index) => fmt_op!(f, "table.grow", index),
 
 			I32Load(_, 0) => write!(f, "i32.load"),
 			I32Load(_, offset) => write!(f, "i32.load offset={}", offset),
@@ -2481,6 +2541,9 @@ impl fmt::Display for Instruction {
 			I64Extend8S => write!(f, "i64.extend8_s"),
 			I64Extend16S => write!(f, "i64.extend16_s"),
 			I64Extend32S => write!(f, "i64.extend32_s"),
+
+			RefNull => write!(f, "ref.null"),
+			RefIsNull => write!(f, "ref.isnull"),
 
 			AtomicWake(_) => write!(f, "atomic.wake"),
 			I32AtomicWait(_) => write!(f, "i32.atomic.wait"),
